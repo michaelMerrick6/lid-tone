@@ -1,49 +1,39 @@
-# Implementation notes
-
-The interesting constraint is the time between the lid sensor changing and macOS suspending the audio device. LidTone starts playback at the first notification and acknowledges sleep promptly after the remaining clip. It cannot promise that an audio driver will remain active.
-
-## Event path
+# Motion audio architecture
 
 ```text
-IOPMrootDomain general-interest notification
-    → clamshell bitfield
-    → LidTransition.observe(closed, enabled)
-    → one preloaded AVAudioPlayer starts
+Apple hinge orientation sensor
+    → feature report 1, ID + little-endian angle in degrees
+    → 30 Hz serial sampling
+    → validated angle + monotonic timestamp
+    → signed angular velocity, noise threshold, decay
+    → lock-free synthesizer controls
+    → AVAudioSourceNode → system output
 
-IORegisterForSystemPower notification
-    → idle sleep: acknowledge immediately
-    → will sleep: read lid state as fallback, compute remaining lid audio
-    → acknowledge after min(remaining + 25ms, 950ms)
-    → independent 950ms watchdog races normal completion (exactly once)
-    → wake: stop stale audio and silently synchronize state
+Actual angle and motion status → main thread → SwiftUI at 10 Hz
 ```
 
-Both notification ports deliver to one serial queue. Audio players and the transition state are confined to that queue. UI changes enqueue configurations; event status changes return to the main queue. The watchdog has its own queue and a lock-protected, one-shot acknowledgement. It never needs to wait for the UI.
+## Sensor access
 
-The watchdog is scheduled before reading the registry or attempting playback in the sleep callback. Cleanup acknowledges any outstanding event before closing the IOKit connection. Timers retain only the one-shot acknowledgement; a late timer cannot acknowledge again after cleanup.
+The reader uses public IOKit HID functions, but Apple's vendor sensor protocol is undocumented. It matches only vendor 0x05AC / usage page 0x20 / usage 0x8A and opens the sensor without seizing it. It never opens keyboard or pointer devices. Access was verified on an M4 MacBook Air without administrator privileges or additional permissions.
 
-The time limit bounds the scheduled delay once the sleep callback runs. This is not a real-time guarantee: an OS scheduler stall, a hung process, or a callback that never reaches the process remains outside the app's control. macOS also has its own notification timeout.
+A report must contain at least three bytes, start with report ID 1, and decode to 0–360 degrees. The tested hardware returned `[1, 91, 0]` at 91°. Degrees are used directly; no unverified hundredths-of-degree conversion is applied. The actual physical hinge has a narrower normal range; the app never asks users to force it past that range.
 
-## Lid state, not sleep guessing
+Sampling stays off the UI thread. Failed connections are retried every three seconds and failed reads silence the audio. Pausing sounds closes the sensor handle. Sleep suspends the reader and audio engine; wake reconnects and re-baselines. This version does not intercept, veto, or delay sleep.
 
-`AppleClamshellState` provides the initial state. `kIOPMMessageClamshellStateChange` supplies subsequent state in bit zero. The other bit describes whether lid close causes sleep; changes to that policy can emit another notification with the same lid state. Therefore duplicate suppression is necessary even in normal docked operation.
+## Motion mapping
 
-`LidTransition` accepts only a known open → closed transition. Launching with an already closed lid is silent. On machines without a lid property, previews work and settings report that no lid was detected. A genuine subsequent open notification can establish state.
+The initial sample is silent. Angle differences over elapsed monotonic time yield signed velocity. Changes smaller than 0.35° are ignored, and velocity decays quickly when readings stop changing. After 140 ms without a movement sample it is set to zero. Gaps of 0.5 seconds or more, non-monotonic timestamps, invalid values, or jumps above 35° establish a new silent baseline.
 
-`SystemWillSleep` also reads the lid property, covering a missed or differently ordered clamshell event. The same transition gate prevents double playback. Open-lid idle/manual sleep produces no new sound. Only an active **lid** sound can delay acknowledgement; a settings preview cannot.
+Intensity is a bounded square-root mapping of speed with adjustable response. Direction changes are reflected immediately instead of averaging opening and closing into silence. Quantization of whole-degree readings remains a physical limitation, especially during slow movement.
 
-## Audio and packaging
+Preview uses a separate simulated motion trace. It never replaces the displayed live angle. After the preview the real tracker resets so a sensor change accumulated during the demonstration cannot cause a stale swoosh.
 
-Four mono PCM WAV files are decoded and prepared at launch. Playback does not fetch files or start a subprocess. The app volume scales playback without altering system volume or switching the user's output device. Custom files are limited before copying and decoded before becoming the selection.
+## Audio thread
 
-SwiftPM packages resources separately from the executable. The build script places the resource bundle in `Contents/Resources`; `SoundResources` resolves that location before falling back to SwiftPM's development accessor. The package has no third-party dependencies.
+The control queue publishes angle, velocity, intensity, volume, and voice selection through lock-free C atomics. The render thread owns all oscillator phases, noise state, and envelopes. It performs no allocation, blocking locks, file or network I/O, or UI work. Parameter snapshots can span one control update; each field is independently bounded, so this can only change timbre briefly, not produce invalid samples.
 
-The tiny C target evaluates public SDK message macros, whose nested C macros do not import directly into Swift. No private framework is linked. Launch at login uses the user-controlled `SMAppService.mainApp` API.
+Creak uses phase modulation and a stick/slip envelope with filtered noise. The lightsaber-style voice uses several harmonics plus motion-dependent air noise. Both are original synthesis, not sampled movie assets. An 8 ms attack / 28 ms release smooths gain changes; soft limiting bounds the output. The audio engine pauses after 250 ms without intensity and restarts on movement, avoiding a permanently active output while the screen is still.
 
-## Tradeoffs
+## Compatibility and tests
 
-- Short clips preserve sleep responsiveness but limit elaborate effects.
-- Current output respects headphones and system mute; it cannot guarantee external speakers.
-- A paused app continues monitoring notifications but starts no lid audio.
-- Original modal/noise synthesis makes the sound assets reproducible and redistributable; recorded Foley can sound more realistic and can be imported by the user.
-- The app is an unsandboxed, ad-hoc-signed local build. Public notarized distribution requires the maintainer's own Developer ID and notarization credentials, which are not included.
+The offline tests run independently of HID hardware or audio output devices. They validate behavior and the numerical audio signal, not perceived sound quality. The optional `--sensor-check` tests real HID access. The UI reports missing/restricted sensors rather than pretending movement works on unsupported models.

@@ -1,29 +1,27 @@
 # Verification
 
-## Automated checks
+## Automated
 
-`swift test` exercises pure state transitions and the acknowledgement race/watchdog. `LidTone --check` decodes all bundled sounds and checks their duration. The packaging script verifies the app's code signature. CI builds arm64 and x86_64 into a universal app.
+`swift test` covers HID report validation, startup silence, opening/closing direction, stillness, jitter suppression, wake gaps, invalid values, sensor jumps, response scaling, and DSP signal bounds, mute, and fade-out.
 
-These checks do not close a real lid or establish audible playback during the hardware's sleep transition.
+`LidTone --check` renders both effects offline. `LidTone --sensor-check` separately opens only the hinge sensor and prints its live angle. CI does not require that hardware-dependent check because hosted macOS runners may not expose a hinge sensor.
 
-## Physical MacBook checklist
+The packaging script verifies the app signature; CI verifies that the executable contains both arm64 and x86_64.
 
-Record Mac model, chip, macOS version, output route, and the observations below when testing. Do not mark hardware behavior verified without actually trying it.
+## Physical test
 
-- [ ] First launch shows settings and detects the laptop lid.
-- [ ] Preview each built-in through the current audio output.
-- [ ] Choose Wooden door. Close and reopen the lid; hear one short sound.
-- [ ] Repeat for each sound, including closing shortly after a preview.
-- [ ] Leave the lid open and choose Apple menu → Sleep; hear no lid sound.
-- [ ] Pause lid sounds, close/reopen, then resume; no stale sound should play.
-- [ ] Wake normally and verify no duplicate sound plays on wake.
-- [ ] Test while connected to an external display in supported clamshell mode.
-- [ ] Test built-in speakers, headphones, and Bluetooth separately; note any truncation/latency.
-- [ ] Import a short clip, restart the app, and confirm it still previews.
-- [ ] Reject an overlong clip and an oversized file with a readable message.
-- [ ] Turn Start at login on/off and confirm macOS Login Items reflects the change.
-- [ ] Quit while a clip is playing; the process exits and normal sleep remains available.
+Sensor connection and a 91° reading were verified on an M4 MacBook Air (Mac16,13), macOS 15.6.1. During physical testing, the user confirmed that the angle changes and sound follows screen movement. The captured settings image also shows a live 72° reading and closing motion. Other checks below remain unverified unless marked.
 
-## Distribution
+- [x] Confirm the displayed angle changes when gently tilting the screen.
+- [x] Select Creaking hinge: sound should follow motion in both directions.
+- [ ] Select Lightsaber: pitch/texture should follow motion, with stronger response to faster movement.
+- [ ] Hold the screen still: sound should fade to silence within roughly 200 ms.
+- [ ] Try slow small adjustments; note whole-degree sensor stepping.
+- [ ] Preview motion: hear a short synthetic movement demo; live angle stays real.
+- [ ] Pause: actual motion is silent; preview remains available by explicit action.
+- [ ] Resume: no stale accumulated movement sound.
+- [ ] Sleep/wake normally: reconnect and baseline without a wake swoosh.
+- [ ] Test built-in speakers and Bluetooth separately; note output latency.
+- [ ] Test Start at login on/off from a stable app location.
 
-For local validation, run the packaged executable's `--check` after copying the app away from the source checkout. This catches a missing resource bundle that might otherwise be hidden by SwiftPM's development resource path. Never disable system sleep or change `pmset` to test this utility.
+Move the screen only within its normal range. Fully closed/sleeping playback is not a feature of this version. No `pmset` changes or sleep prevention are needed.

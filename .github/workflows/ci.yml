@@ -11,9 +11,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Test lid transitions and sleep acknowledgement
+      - name: Test motion tracking and continuous audio DSP
         run: swift test
-      - name: Package universal app and validate sounds
+      - name: Package universal app and validate synthesizers
         run: ./scripts/build-app.sh --universal
       - name: Verify both architectures
         run: lipo -verify_arch arm64 x86_64 dist/LidTone.app/Contents/MacOS/LidTone

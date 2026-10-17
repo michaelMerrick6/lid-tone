@@ -1,14 +1,16 @@
 # LidTone
 
-**Give your MacBook a satisfying closing sound.**
+**Sound that moves with your MacBook screen.**
 
-A tiny native macOS menu bar app: close your laptop and hear a wooden door, a soft latch, a book closing, or a space hatch. Pick a favorite, shuffle the built-ins, or bring a short sound of your own.
+Tilt the screen forward or backward and hear a creaking wooden hinge or a lightsaber-style hum and swoosh. Move faster and the sound responds. Hold still and it fades to silence.
 
-![LidTone settings](docs/lidtone.png)
+![LidTone live hinge settings](docs/lidtone.png)
 
-## Get started
+## Run it
 
-Requires a MacBook with **macOS 13 Ventura or later**. Apple silicon and Intel builds are supported. You need Xcode or its Swift command line tools to build from source; there are no external package dependencies.
+Requires **macOS 13+** and a MacBook that exposes Apple's HID hinge-angle sensor. Sensor access, live angle changes, and sound following physical screen movement were verified on an **M4 MacBook Air (Mac16,13)** with user confirmation. Compatibility depends on the sensor, not just the chip: some M1/M2 and older models do not expose it. The app reports an unavailable sensor honestly; the preview still works.
+
+Build locally with Xcode or the Swift command line tools. No external dependencies:
 
 ```sh
 git clone https://github.com/michaelMerrick6/lid-tone.git
@@ -17,72 +19,56 @@ cd lid-tone
 open dist/LidTone.app
 ```
 
-The first launch opens settings. After that, use the **laptop icon in the menu bar** to open settings, preview a sound, pause playback, or quit. Keep the app running, choose **Wooden door**, and close your lid. Closing the settings window leaves the menu bar app running.
+Choose **Creaking hinge** or **Lightsaber**, leave motion sounds enabled, and gently adjust the screen within its normal hinge range. The live angle should change. **Preview motion** demonstrates the selected sound using a simulated tilt; the displayed angle always comes from the actual sensor.
 
-For both chip families in one app:
+The laptop menu bar icon opens settings, previews motion, pauses sounds, or quits. Closing settings leaves the app running. Start at login is optional and uses macOS Login Items. Move the app to a stable location before enabling that option.
+
+With full Xcode installed, build a universal app for Intel and Apple silicon:
 
 ```sh
 ./scripts/build-app.sh --universal
 ```
 
-The script produces `dist/LidTone.app` and `dist/LidTone-macOS.zip`, checks all four audio resources, and verifies the app's signature. Local builds use an ad-hoc signature. Downloaded release builds are **not Apple-notarized**; macOS may restrict opening them. Building locally is the recommended route until a Developer ID distribution is available.
+Outputs: `dist/LidTone.app` and `dist/LidTone-macOS.zip`. Local and beta builds are **ad-hoc signed, not Apple-notarized**. macOS may restrict downloaded builds; building locally is recommended until Developer ID distribution is available.
 
-## Make it yours
+## Motion, not a close trigger
 
-- **Four original sounds:** wooden door, soft latch, book close, and space hatch.
-- **Preview buttons:** hear each option before choosing it.
-- **Volume:** independent app volume, still subject to your Mac's output volume and mute state.
-- **Shuffle:** choose a random built-in on each close.
-- **Custom audio:** import WAV, AIFF, M4A, or MP3, up to **0.85 seconds / 2 MB**. Imported audio is copied locally so moving the original file won't break it.
-- **Start at login:** an opt-in macOS login item. Leave it off if you only want to run LidTone occasionally. Move the app to a stable location, such as Applications, before enabling it.
+The app reads the **actual hinge angle at 30 Hz**, rather than waiting for a lid-close or sleep notification. Angle change produces signed angular velocity; speed sets intensity, angle and direction shape the pitch, and a short envelope prevents clicks. Both effects are generated continuously with original DSP. There are no movie sound samples or sound files to download.
 
-Audio uses the **currently selected output**. If headphones or Bluetooth audio are connected, the sound goes there; Bluetooth latency can make the short playback window less reliable.
+The sensor may quantize readings to whole degrees. Small or very slow tilts can therefore feel stepped. **Response** adjusts the strength of the motion response. It cannot add precision the hardware does not provide.
 
-## How lid close works
+Audio plays through your current output, subject to system mute/volume. Built-in speakers offer lower latency than Bluetooth. Audio pauses after motion stops and suspends during sleep. There is no audio while the Mac is asleep, no delayed sleep acknowledgement, and no power-setting changes.
 
-LidTone subscribes to IOKit's `kIOPMMessageClamshellStateChange` on `IOPMrootDomain`. The notification arrives before a lid-triggered sleep and carries the actual closed/open state. This also handles normal closed-lid use with an external display, where closing the lid may not put the Mac to sleep.
+## Under the hood
 
-Audio is preloaded. An open → closed transition starts one sound; duplicate notifications are ignored. Ordinary idle sleep or Apple-menu sleep with the lid open stays silent. Wake synchronizes state without replaying the previous close.
+- `HingeSensor`: narrow IOHID matching for Apple vendor `0x05AC`, sensor page `0x20`, orientation usage `0x8A`; reads report 1 and validates its ID, length, and degree range.
+- `MotionTracker`: signed velocity, noise threshold, short decay to silence, and safe re-baselining after wake, bad readings, or discontinuities.
+- `MotionAudio`: an `AVAudioSourceNode` feeds the system mixer. A small C synthesizer uses lock-free atomic controls; the render callback does not allocate memory, acquire locks, read files, or touch the UI.
+- `MotionController`: one sensor queue, 30 Hz sampling, honest sensor errors, reconnect attempts, and main-thread UI updates at 10 Hz.
+- Two synthesized voices: friction-like phase-modulated creaking and an electric harmonic hum with motion-dependent air noise.
 
-When macOS delivers `kIOMessageSystemWillSleep`, LidTone acknowledges the event after any remaining lid audio, with a **0.95-second maximum scheduled delay**. A separate watchdog queue acknowledges even if the audio queue stalls. Idle sleep is acknowledged immediately. The app never vetoes sleep, changes power settings, installs a privileged helper, or polls the lid sensor.
+See [architecture](docs/architecture.md) and [testing](docs/testing.md) for implementation details and practical limits.
 
-**This is best-effort audio before sleep, not a guarantee of playback while asleep.** Hardware and macOS may suspend an audio device before the sound completes. The scheduler itself can also be delayed under load. Short local clips and built-in speakers give it the best chance. Physical lid-close behavior needs checking on each Mac model; unit tests cannot reproduce the hardware's sleep timing.
-
-Read [the implementation notes](docs/architecture.md) and [hardware test checklist](docs/testing.md). Apple's [sleep/wake notification guide](https://developer.apple.com/library/archive/qa/qa1340/_index.html) explains the power callback contract. The clamshell message and keys are defined in the macOS SDK's `IOKit/pwr_mgt/IOPM.h`.
-
-## Development
+## Verify and develop
 
 ```sh
 swift test
 swift run LidTone --check
-./scripts/build-app.sh
+swift run LidTone --sensor-check
 ```
 
-The tests cover state transitions, duplicate suppression, startup/wake behavior, disabled mode, invalid durations, concurrent acknowledgement, and the watchdog. `--check` decodes every bundled audio file without playing audio or changing preferences. CI runs the tests and packages a universal app.
+`--check` renders both DSP voices offline and verifies finite, bounded, non-silent output. `--sensor-check` reads the real sensor without playing audio or modifying preferences; it intentionally fails on unsupported hardware. CI runs the unit/DSP tests and packages a universal app without requiring a physical hinge sensor.
 
-The original sound generator uses only Python's standard library:
+Tests cover report parsing, startup silence, both movement directions, stopping, jitter, invalid values, sensor jumps, wake gaps, response scaling, audio headroom, zero volume, and fade-out. Passing these tests does not establish perceived sound quality or latency on every Mac; those require physical testing.
 
-```sh
-python3 scripts/generate_sounds.py
-```
+## Sensor research credit
 
-It combines damped resonances, shaped noise, and short synthesized creaks. These are synthesized Foley, not recordings of real doors. The generator and WAV files share this repository's MIT license. Custom audio remains yours and is never uploaded.
-
-## Project layout
-
-```text
-Sources/LidTone/          SwiftUI settings, menu bar app, audio, IOKit monitor
-Sources/LidToneCore/      Testable lid transition and sleep acknowledgement logic
-Sources/PowerBridge/     Clang bridge for SDK macros Swift cannot import
-Tests/                   Behavior and concurrency tests
-scripts/                 App packaging, icon drawing, reproducible sound generation
-packaging/               App metadata
-```
+The Apple vendor HID report format is not a documented macOS hinge-angle API. [Sam Gold's LidAngleSensor](https://github.com/samhenrigold/LidAngleSensor) made this sensor interface discoverable and demonstrated hinge-driven sound. This project implements its own Swift reader, motion mapping, interface, and original audio synthesis. It does not bundle that project's code or audio. Device/report compatibility may change with hardware or macOS updates.
 
 ## Privacy and removal
 
-No accounts, network requests, analytics, microphone access, or accessibility permission are needed. Preferences stay in macOS UserDefaults for `com.michaelmerrick.LidTone`; imported clips live in `~/Library/Application Support/LidTone/CustomSounds`.
+No accounts, network requests, telemetry, microphone access, keyboard monitoring, administrator privileges, or accessibility permission are used. The HID match is restricted to the hinge orientation sensor. Settings are stored locally in UserDefaults under `com.michaelmerrick.LidTone`.
 
-To remove it: turn off **Start at login**, quit LidTone, and delete the app. You can remove that Application Support folder and the app's preferences if you also want to clear your choices.
+To remove: turn off Start at login, quit, then delete the app. An earlier close-sound prototype could import clips into `~/Library/Application Support/LidTone/CustomSounds`; the motion version does not read or upload those files.
 
 Built by Michael Merrick with AI-assisted implementation. MIT licensed.

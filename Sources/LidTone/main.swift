@@ -1,5 +1,6 @@
 import AppKit
-import AVFoundation
+import HingeAudio
+import LidToneCore
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -13,12 +14,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model = AppModel()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "laptopcomputer", accessibilityDescription: "LidTone")
-        statusItem.button?.toolTip = "LidTone — sounds for your lid"
+        statusItem.button?.toolTip = "LidTone — sounds that follow your screen"
         let menu = NSMenu()
         menu.addItem(withTitle: "LidTone…", action: #selector(showSettings), keyEquivalent: ",").target = self
-        menu.addItem(withTitle: "Preview sound", action: #selector(preview), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Preview motion", action: #selector(preview), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        enabledItem = menu.addItem(withTitle: "Enable lid sounds", action: #selector(toggleEnabled), keyEquivalent: "")
+        enabledItem = menu.addItem(withTitle: "Enable motion sounds", action: #selector(toggleEnabled), keyEquivalent: "")
         enabledItem.target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit LidTone", action: #selector(quit), keyEquivalent: "q").target = self
@@ -33,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: "Quit LidTone", action: #selector(quit), keyEquivalent: "q").target = self
         mainMenu.addItem(appItem)
         NSApp.mainMenu = mainMenu
-        if !UserDefaults.standard.bool(forKey: "hasOpened") {
+        if !UserDefaults.standard.bool(forKey: "hasOpened") || !model.loginEnabled {
             showSettings()
             UserDefaults.standard.set(true, forKey: "hasOpened")
         }
@@ -56,28 +57,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleEnabled() { model.enabled.toggle() }
     @objc private func quit() { NSApp.terminate(nil) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool { showSettings(); return true }
-    func applicationWillTerminate(_ notification: Notification) { model.monitor.stop() }
+    func applicationWillTerminate(_ notification: Notification) { model.motion.stop() }
 }
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) { enabledItem.state = model.enabled ? .on : .off }
 }
 
+if CommandLine.arguments.contains("--sensor-check") {
+    do {
+        let sensor = HingeSensor(); try sensor.connect()
+        print("Live hinge sensor: \(try sensor.read())°")
+        sensor.close(); exit(0)
+    } catch { print(error.localizedDescription); exit(1) }
+}
 if CommandLine.arguments.contains("--check") {
-    // Exercises the same bundled audio decoder without a GUI or changing preferences.
-    var failures = 0
-    for sound in SoundChoice.builtIns {
-        do {
-            guard let url = SoundResources.bundle.url(forResource: sound.id, withExtension: "wav", subdirectory: "Sounds") else {
-                throw NSError(domain: "LidTone", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing resource"])
-            }
-            let player = try AVAudioPlayer(contentsOf: url)
-            guard player.duration > 0 && player.duration <= 0.85, player.prepareToPlay() else {
-                throw NSError(domain: "LidTone", code: 3, userInfo: [NSLocalizedDescriptionKey: "Invalid sound duration or decoder"])
-            }
-            print("OK \(sound.id): \(String(format: "%.3f", player.duration)) s")
-        } catch { failures += 1; print("FAIL \(sound.id): \(error)") }
+    guard let voice = LTVoiceCreate(48000) else { exit(1) }
+    defer { LTVoiceDestroy(voice) }
+    for style in 0...1 {
+        LTVoiceSet(voice, 90, 50, 0.8, 0.65, Int32(style))
+        var samples = [Float](repeating: 0, count: 4800)
+        LTVoiceRender(voice, &samples, UInt32(samples.count))
+        guard samples.allSatisfy({ $0.isFinite && abs($0) <= 0.68 }), samples.contains(where: { abs($0) > 0.01 }) else { exit(1) }
+        print("OK \(style == 0 ? "creaking hinge" : "lightsaber"): live DSP renders a bounded signal")
     }
-    exit(failures == 0 ? 0 : 1)
+    exit(0)
 }
 let application = NSApplication.shared
 let delegate = AppDelegate()
