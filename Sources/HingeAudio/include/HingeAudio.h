@@ -1,6 +1,7 @@
 #ifndef LIDTONE_HINGE_AUDIO_H
 #define LIDTONE_HINGE_AUDIO_H
 #include <stdint.h>
+#include "PowerMessages.h"
 typedef struct LTVoice LTVoice;
 LTVoice *LTVoiceCreate(double sampleRate);
 void LTVoiceDestroy(LTVoice *voice);

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prepare credited CC0 recordings. Requires NumPy for development only.
 
-Input directory: decoded wood.wav, saber-real.wav, and the extracted
+Input directory: decoded wood.wav, saber-real.wav, saber-off.wav, and the extracted
 Button Accordion HN SFZ+WAV-20240329 sound bank. See docs/AUDIO_CREDITS.md.
 """
 import sys
@@ -46,6 +46,8 @@ save('wood-creaks', resample(wood, sr))
 saber, sr = read(SOURCE/'saber-real.wav')
 save('saber-hum', resample(saber[round(32*sr):round(38*sr)], sr))
 save('saber-swings', resample(saber[round(42*sr):round(51.8*sr)], sr))
+off, sr = read(SOURCE/'saber-off.wav')
+save('saber-off', resample(off, sr))
 
 bank = SOURCE/'Button Accordion HN SFZ+WAV-20240329'
 notes = {'C5':(72926,86200,-28), 'E5':(65908,83784,-30), 'G5':(78733,97217,-29),

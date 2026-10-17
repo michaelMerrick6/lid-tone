@@ -82,6 +82,10 @@ if CommandLine.arguments.contains("--check") {
         guard samples.allSatisfy({ $0.isFinite && abs($0) <= 0.68 }), samples.contains(where: { abs($0) > 0.01 }) else { exit(1) }
         print("OK \(["recorded wood", "recorded lightsaber", "sampled accordion"][style]): loaded samples render a bounded signal")
     }
+    do {
+        let player = try SampleLibrary.shutdownPlayer(prepare: false)
+        print("OK lightsaber power-down: \(String(format: "%.3f", player.duration)) seconds")
+    } catch { print("Power-down asset: \(error.localizedDescription)"); exit(1) }
     exit(0)
 }
 let application = NSApplication.shared

@@ -18,7 +18,7 @@ The reader uses public IOKit HID functions, but Apple's vendor sensor protocol i
 
 A report must contain at least three bytes, start with report ID 1, and decode to 0–360 degrees. The tested hardware returned `[1, 91, 0]` at 91°. Degrees are used directly; no unverified hundredths-of-degree conversion is applied. The actual physical hinge has a narrower normal range; the app never asks users to force it past that range.
 
-Sampling stays off the UI thread. Failed connections are retried every three seconds and failed reads silence the audio. Pausing sounds closes the sensor handle. Sleep suspends the reader and audio engine; wake reconnects and re-baselines. This version does not intercept, veto, or delay sleep.
+Sampling stays off the UI thread. Failed connections are retried every three seconds and failed reads silence the audio. Pausing sounds closes the sensor handle. Sleep suspends the reader and audio engine; wake reconnects and re-baselines. A separate IOKit power observer acknowledges idle sleep immediately and gives only an actual close-triggered power-down clip a bounded completion window, described below.
 
 ## Motion mapping
 
@@ -39,3 +39,15 @@ Loops overlap their last 120 ms with the beginning instead of making a hard cut.
 ## Compatibility and tests
 
 The offline tests run independently of HID hardware or audio output devices. They validate behavior and the numerical audio signal, not perceived sound quality. The optional `--sensor-check` tests real HID access. The UI reports missing/restricted sensors rather than pretending movement works on unsupported models.
+
+## Lightsaber power-down on close
+
+`SaberCloseTrigger` arms after a real sensor reading at or above 20° and consumes the close at or below 10°. Hysteresis suppresses repeated effects when sensor values bounce around the threshold. Disabled playback and the other modes consume the event without sound; switching to Lightsaber with an already closed lid is silent. Startup and wake clear the gate until another open reading is received. Preview motion never supplies simulated angles to the close gate.
+
+The end effect is a separate preloaded AVAudioPlayer with zero loops. While the saber is near closed, movement intensity is suppressed so the hum does not restart over its power-down. Pausing the continuous audio engine leaves this one-shot alive. An explicit preview is available independently of physical lid movement.
+
+`SystemPowerObserver` registers using IORegisterForSystemPower, with callbacks on the same serial controller queue. On will-sleep it checks the real AppleClamshellState property and consumes a still-armed close if the fast-close sensor sample was missed. The same gate prevents double playback. Sensor sampling and the looping engine stop for sleep, while a close-triggered one-shot may finish.
+
+Every required IOKit notification is acknowledged. Remaining one-shot time plus 25 ms is capped at 950 ms; an independent queue races a 950 ms watchdog against normal completion. A lock-protected one-shot callback ensures only one IOAllowPowerChange call per notification and prevents connection teardown during an acknowledgement. Idle sleep is allowed immediately; no sleep veto or power-setting modification is used. NSWorkspace sleep/wake notifications provide a fallback if IOKit registration fails.
+
+The scheduled cap is not a real-time guarantee under OS scheduling stalls or a hung process. Audio hardware may suspend before the end of the clip. Physical lid-close timing must therefore be tested on the actual Mac.

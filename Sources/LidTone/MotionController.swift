@@ -5,6 +5,9 @@ final class MotionController {
     private let queue = DispatchQueue(label: "com.michaelmerrick.LidTone.hinge", qos: .userInitiated)
     private let sensor = HingeSensor()
     private let audio = MotionAudio()
+    private let power = SystemPowerObserver()
+    private var closeTrigger = SaberCloseTrigger()
+    private var shutdownClosing = false
     private var tracker = MotionTracker()
     private var previewTracker = MotionTracker()
     private var timer: DispatchSourceTimer?
@@ -25,6 +28,11 @@ final class MotionController {
     func start() {
         queue.async {
             guard self.timer == nil else { return }
+            self.power.onSleep = { [weak self] closed in self?.prepareForSleep(lidClosed: closed) ?? 0 }
+            self.power.onWake = { [weak self] in self?.resumeWork() }
+            if !self.power.start(on: self.queue) {
+                self.onError?("Sleep notifications unavailable; the lid-close effect may be cut short.")
+            }
             let timer = DispatchSource.makeTimerSource(queue: self.queue)
             timer.schedule(deadline: .now(), repeating: 1.0/30.0, leeway: .milliseconds(2))
             timer.setEventHandler { [weak self] in self?.tick() }
@@ -35,26 +43,53 @@ final class MotionController {
     func configure(enabled: Bool, volume: Double, sensitivity: Double, style: Int) {
         queue.async {
             if self.enabled != enabled {
-                self.tracker.reset(); self.connected = false; self.sensor.close(); self.retryAt = 0
+                self.tracker.reset(); self.closeTrigger.reset(); self.connected = false; self.sensor.close(); self.retryAt = 0
             }
+            if self.style != style { self.audio.stopShutdown(); self.shutdownClosing = false }
             self.enabled = enabled; self.volume = volume; self.style = style; self.sensitivity = sensitivity
-            if !enabled { self.audio.silence() }
+            if !enabled { self.audio.pause(); self.shutdownClosing = false }
         }
     }
     func preview() {
         queue.async { self.previewTracker.reset(); self.previewStarted = ProcessInfo.processInfo.systemUptime }
     }
-    func suspend() {
+    func previewShutdown() {
         queue.async {
-            self.suspended = true; self.previewStarted = nil
-            self.tracker.reset(); self.audio.pause(); self.sensor.close(); self.connected = false
+            self.previewStarted = nil
+            do { try self.audio.playShutdown(volume: self.volume) }
+            catch { self.onError?(error.localizedDescription) }
         }
     }
+    // NSWorkspace provides a fallback when IOKit registration is unavailable.
+    func suspend() {
+        queue.async { if !self.power.isRegistered { _ = self.prepareForSleep(lidClosed: false) } }
+    }
     func resume() {
-        queue.async { self.suspended = false; self.tracker.reset(); self.retryAt = 0 }
+        queue.async { if !self.power.isRegistered { self.resumeWork() } }
+    }
+    private func resumeWork() {
+        suspended = false; tracker.reset(); closeTrigger.reset()
+        shutdownClosing = false; audio.pause(); retryAt = 0
+    }
+    private func beginShutdown() {
+        guard volume > 0 else { shutdownClosing = false; return }
+        do { try audio.playShutdown(volume: volume); shutdownClosing = true }
+        catch { onError?(error.localizedDescription) }
+    }
+    private func prepareForSleep(lidClosed: Bool) -> TimeInterval {
+        if lidClosed && closeTrigger.closeEvent(enabled: enabled, style: style) { beginShutdown() }
+        suspended = true; previewStarted = nil; tracker.reset()
+        sensor.close(); connected = false
+        audio.pauseMotion()
+        if shutdownClosing { return audio.remainingShutdown }
+        audio.stopShutdown()
+        return 0
     }
     func stop() {
-        queue.sync { timer?.cancel(); timer = nil; audio.pause(); sensor.close(); connected = false }
+        queue.sync {
+            timer?.cancel(); timer = nil; power.stop()
+            audio.pause(); sensor.close(); connected = false
+        }
     }
     private func tick() {
         guard !suspended else { return }
@@ -77,6 +112,10 @@ final class MotionController {
                 status = sensorStatus
             }
         }
+        if let actual {
+            if actual.angle >= 20 { shutdownClosing = false }
+            if closeTrigger.observe(angle: actual.angle, enabled: enabled, style: style) { beginShutdown() }
+        }
         var frame = actual ?? MotionFrame(angle: 90, velocity: 0, intensity: 0)
         var previewing = false
         if let began = previewStarted {
@@ -86,10 +125,11 @@ final class MotionController {
                 frame = previewTracker.update(angle: 90 + 30*sin(elapsed*Double.pi*1.8), time: now) ?? frame
             } else { previewStarted = nil; tracker.reset(); frame.intensity = 0 }
         }
+        if style == 1 && closeTrigger.isNearClosed { frame.intensity = 0 }
         do {
             try audio.set(frame, volume: volume, style: style)
             if frame.intensity > 0 { lastAudible = now }
-            else if audio.isRunning && now-lastAudible > 0.25 { audio.pause() }
+            else if audio.isRunning && now-lastAudible > 0.25 { audio.pauseMotion() }
         } catch { audio.pause(); onError?("Audio output failed: \(error.localizedDescription)") }
         tickCount += 1
         if tickCount % 3 == 0 { onReading?(actual, status, previewing) }

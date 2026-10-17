@@ -10,7 +10,7 @@ struct MotionStyle: Identifiable {
     let symbol: String
     static let all: [Self] = [
         .init(id: 0, title: "Creaking hinge", detail: "Real wooden-door creaks, stretched across your tilt.", symbol: "door.left.hand.open"),
-        .init(id: 1, title: "Lightsaber", detail: "Recorded saber hum and a sweeping energy blade.", symbol: "bolt.fill"),
+        .init(id: 1, title: "Lightsaber", detail: "Saber hum, swings, and a power-down on lid close.", symbol: "bolt.fill"),
         .init(id: 2, title: "Accordion", detail: "Sampled Hohner reeds. Your screen is the bellows.", symbol: "pianokeys")
     ]
 }
@@ -70,6 +70,7 @@ final class AppModel: ObservableObject {
         if let style { selectedStyle = style }
         error = nil; motion.preview()
     }
+    func previewShutdown() { error = nil; motion.previewShutdown() }
     func setLogin(_ enabled: Bool) {
         do {
             if enabled { try SMAppService.mainApp.register() }

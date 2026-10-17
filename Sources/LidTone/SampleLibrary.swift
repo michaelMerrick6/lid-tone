@@ -25,6 +25,18 @@ enum SampleLibrary {
             }
         }
     }
+    static func shutdownPlayer(prepare: Bool = true) throws -> AVAudioPlayer {
+        guard let url = bundle.url(forResource: "saber-off", withExtension: "wav", subdirectory: "Audio") else {
+            throw assetError("Missing lightsaber power-down recording")
+        }
+        let player = try AVAudioPlayer(contentsOf: url)
+        guard player.duration > 0, player.duration <= 0.9 else {
+            throw assetError("The lightsaber power-down recording must be shorter than 0.9 seconds")
+        }
+        player.numberOfLoops = 0
+        if prepare { player.prepareToPlay() }
+        return player
+    }
     private static func assetError(_ message: String) -> NSError {
         NSError(domain: "LidTone.Audio", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }

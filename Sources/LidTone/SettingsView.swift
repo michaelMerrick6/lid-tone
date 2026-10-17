@@ -65,6 +65,10 @@ struct SettingsView: View {
                 Toggle("Start at login", isOn: Binding(get: { model.loginEnabled }, set: { model.setLogin($0) })).toggleStyle(.switch).font(.system(size: 12))
                 Spacer()
                 Button { model.preview() } label: { Label("Preview motion", systemImage: "play.fill") }.controlSize(.large)
+                if model.selectedStyle == 1 {
+                    Button { model.previewShutdown() } label: { Image(systemName: "power") }
+                        .controlSize(.large).help("Preview lightsaber power down").accessibilityLabel("Preview lightsaber power down")
+                }
             }
             Divider()
             VStack(alignment: .leading, spacing: 7) {

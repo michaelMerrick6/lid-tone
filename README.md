@@ -39,7 +39,9 @@ The recordings are bundled, preloaded, and played through a continuous sample en
 
 The sensor may quantize readings to whole degrees. A cadence-aware hold bridges repeated readings during slow tilts, so sound does not drop out at every whole-degree step. Extremely slow movement can still be stepped; the adaptive tail can last roughly 0.6 seconds after the final movement. **Response** adjusts the strength of the motion response. It cannot add precision the hardware does not provide.
 
-Audio plays through your current output, subject to system mute/volume. Built-in speakers offer lower latency than Bluetooth. Audio pauses after motion stops and suspends during sleep. There is no audio while the Mac is asleep, no delayed sleep acknowledgement, and no power-setting changes.
+Audio plays through your current output, subject to system mute/volume. Built-in speakers offer lower latency than Bluetooth. Audio pauses after motion stops. **Lightsaber mode also powers down when you close the lid:** an independently created, recorded end effect starts at 10° or less after the screen has been opened to at least 20°. The early threshold gives the 0.884-second clip time to play before sleep. It fires once, re-arms when you open the screen, and does not run in Wood or Accordion mode. The power-button preview next to Preview motion plays the clip directly.
+
+A real lid-close sleep notification is a fallback for a fast close that skips sensor samples. Only an actual close-triggered clip can defer the sleep acknowledgement, for at most 0.95 seconds of scheduled delay, with an independent watchdog. Idle/manual sleep with the lid open is acknowledged promptly. Audio cannot continue once macOS suspends the hardware, so complete playback at lid close is best effort. No power settings are changed.
 
 ## Under the hood
 
@@ -59,9 +61,9 @@ swift run LidTone --check
 swift run LidTone --sensor-check
 ```
 
-`--check` loads all five recordings and renders all three modes offline and verifies finite, bounded, non-silent output. `--sensor-check` reads the real sensor without playing audio or modifying preferences; it intentionally fails on unsupported hardware. CI runs the unit/DSP tests and packages a universal app without requiring a physical hinge sensor.
+`--check` loads the five continuous recordings, renders all three modes offline, and validates the sixth power-down recording. It verifies finite, bounded, non-silent output. `--sensor-check` reads the real sensor without playing audio or modifying preferences; it intentionally fails on unsupported hardware. CI runs the unit/DSP tests and packages a universal app without requiring a physical hinge sensor.
 
-Tests cover report parsing, startup silence, both movement directions, stopping, jitter, invalid values, sensor jumps, wake gaps, response scaling, slow quantized movement, playback position continuity, audio headroom, zero volume, and fade-out. Passing these tests does not establish perceived sound quality or latency on every Mac; those require physical testing.
+Tests cover report parsing, startup silence, both movement directions, stopping, jitter, invalid values, sensor jumps, wake gaps, response scaling, slow quantized movement, playback position continuity, audio headroom, zero volume, fade-out, close/reopen hysteresis, mode gating, and exactly-once sleep acknowledgement with a watchdog. Passing these tests does not establish perceived sound quality or latency on every Mac; those require physical testing.
 
 ## Sensor research credit
 
