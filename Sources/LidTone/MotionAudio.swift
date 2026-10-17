@@ -7,6 +7,7 @@ final class MotionAudio {
     private let voice: Voice
     private let source: AVAudioSourceNode
     private(set) var isRunning = false
+    private var loadError: Error?
 
     final class Voice {
         let pointer: OpaquePointer
@@ -18,6 +19,7 @@ final class MotionAudio {
         let rate = 48_000.0
         let voice = Voice(rate: rate)
         self.voice = voice
+        do { try SampleLibrary.load(into: voice.pointer) } catch { loadError = error }
         source = AVAudioSourceNode { _, _, count, list in
             // No allocation, locks, file access, or SwiftUI work on the render thread.
             for buffer in UnsafeMutableAudioBufferListPointer(list) {
@@ -30,6 +32,7 @@ final class MotionAudio {
         engine.prepare()
     }
     func set(_ frame: MotionFrame, volume: Double, style: Int) throws {
+        if let loadError { throw loadError }
         LTVoiceSet(voice.pointer, Float(frame.angle), Float(frame.velocity), Float(frame.intensity), Float(volume), Int32(style))
         if frame.intensity > 0 && !isRunning { try engine.start(); isRunning = true }
     }

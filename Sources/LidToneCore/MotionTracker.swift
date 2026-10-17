@@ -22,31 +22,39 @@ public struct MotionTracker {
     private var previous: (angle: Double, time: TimeInterval)?
     private var lastMovement: TimeInterval = 0
     private var velocity: Double = 0
+    private var stepInterval: TimeInterval = 0.08
+    private var hasMoved = false
     public init() {}
-    public mutating func reset() { previous = nil; velocity = 0; lastMovement = 0 }
+    public mutating func reset() { previous = nil; velocity = 0; lastMovement = 0; stepInterval = 0.08; hasMoved = false }
 
     public mutating func update(angle: Double, time: TimeInterval, sensitivity: Double = 1) -> MotionFrame? {
         guard angle.isFinite, (0...360).contains(angle), time.isFinite else { reset(); return nil }
         defer { previous = (angle, time) }
         guard let previous, time > previous.time, time-previous.time < 0.5 else {
-            velocity = 0; lastMovement = time
+            velocity = 0; lastMovement = time; hasMoved = false
             return MotionFrame(angle: angle, velocity: 0, intensity: 0)
         }
         let dt = time-previous.time
         let delta = angle-previous.angle
         // Discontinuous readings are re-baselined, never turned into loud swings.
         guard abs(delta) <= 35 else {
-            velocity = 0; lastMovement = time
+            velocity = 0; lastMovement = time; hasMoved = false
             return MotionFrame(angle: angle, velocity: 0, intensity: 0)
         }
         if abs(delta) >= 0.35 {
-            let instantaneous = max(-300, min(300, delta / dt))
-            velocity = velocity*instantaneous < 0 ? instantaneous : velocity * 0.45 + instantaneous * 0.55
+            // Whole-degree sensors repeat values while still moving. Estimate speed
+            // over the time between angle steps, instead of treating each as a burst.
+            let elapsed = hasMoved ? max(dt, time-lastMovement) : max(dt, 0.08)
+            if hasMoved { stepInterval = min(0.35, max(0.033, elapsed)) }
+            let instantaneous = max(-300, min(300, delta / elapsed))
+            velocity = !hasMoved || velocity*instantaneous < 0 ? instantaneous : velocity * 0.35 + instantaneous * 0.65
             lastMovement = time
+            hasMoved = true
         } else {
-            velocity *= exp(-dt / 0.045)
+            let hold = min(0.42, max(0.12, stepInterval * 1.5))
+            if time-lastMovement > hold { velocity *= exp(-dt / 0.055) }
+            if time-lastMovement > hold + 0.16 { velocity = 0 }
         }
-        if time-lastMovement > 0.14 { velocity = 0 }
         let gain = sensitivity.isFinite ? min(2,max(0.4,sensitivity)) : 1
         let speed = abs(velocity)*gain
         let intensity = speed < 0.8 ? 0 : min(1, sqrt(speed / 85))

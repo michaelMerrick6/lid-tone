@@ -7,7 +7,8 @@ let package = Package(
     targets: [
         .target(name: "LidToneCore"),
         .target(name: "HingeAudio", publicHeadersPath: "include"),
-        .executableTarget(name: "LidTone", dependencies: ["LidToneCore", "HingeAudio"]),
+        .executableTarget(name: "LidTone", dependencies: ["LidToneCore", "HingeAudio"],
+                          resources: [.copy("Resources/Audio")]),
         .testTarget(name: "LidToneCoreTests", dependencies: ["LidToneCore", "HingeAudio"])
     ]
 )

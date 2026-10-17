@@ -3,6 +3,50 @@ import HingeAudio
 @testable import LidToneCore
 
 final class LidToneCoreTests: XCTestCase {
+    private func fixtureVoice() -> OpaquePointer {
+        let voice = LTVoiceCreate(48000)!
+        let samples = (0..<48000).map { index in Float(0.7*sin(Double(index)*0.042)+0.15*sin(Double(index)*0.069)) }
+        for slot in 0..<5 {
+            XCTAssertEqual(LTVoiceLoadSample(voice,Int32(slot),samples,UInt32(samples.count)),1)
+        }
+        return voice
+    }
+    func testQuantizedSlowTiltDoesNotPulseToSilenceBetweenSteps() {
+        var tracker = MotionTracker()
+        _ = tracker.update(angle: 90,time: 1)
+        var intensities: [Double] = []
+        for tick in 1...100 {
+            let frame = tracker.update(angle: 90+Double(tick/9), time: 1+Double(tick)/30)!
+            if tick>20 { intensities.append(frame.intensity) }
+        }
+        XCTAssertTrue(intensities.allSatisfy { $0>0.1 })
+        XCTAssertLessThan(intensities.max()!-intensities.min()!,0.1)
+    }
+    func testRecordedSamplePositionSurvivesControlUpdates() {
+        let continuous = fixtureVoice(), updated = fixtureVoice()
+        defer { LTVoiceDestroy(continuous); LTVoiceDestroy(updated) }
+        var expected = [Float](repeating:0,count:4096)
+        LTVoiceSet(continuous,90,20,0.7,0.65,0)
+        LTVoiceRender(continuous,&expected,4096)
+        var actual: [Float] = []
+        for _ in 0..<16 {
+            LTVoiceSet(updated,90,20,0.7,0.65,0)
+            var block = [Float](repeating:0,count:256)
+            LTVoiceRender(updated,&block,256)
+            actual += block
+        }
+        XCTAssertEqual(actual,expected)
+    }
+    func testEmptyOrInvalidSampleDoesNotCrash() {
+        let voice=LTVoiceCreate(48000)!
+        defer { LTVoiceDestroy(voice) }
+        XCTAssertEqual(LTVoiceLoadSample(voice,0,nil,48000),0)
+        XCTAssertEqual(LTVoiceLoadSample(voice,8,[Float](repeating:0,count:32),32),0)
+        LTVoiceSet(voice,90,30,0.8,1,2)
+        var output=[Float](repeating:1,count:4096)
+        LTVoiceRender(voice,&output,4096)
+        XCTAssertTrue(output.allSatisfy { $0==0 })
+    }
     func testReportDecodesDegreesAndRejectsBadData() {
         XCTAssertEqual(HingeReport.decode([1, 91, 0]), 91)
         XCTAssertEqual(HingeReport.decode([1, 104, 1]), 360)
@@ -76,8 +120,8 @@ final class LidToneCoreTests: XCTestCase {
         XCTAssertEqual(tracker.update(angle: 130,time: 1.066)?.intensity, 0)
     }
     func testBothSynthesizersAreAudibleAndBounded() {
-        for style in 0...1 {
-            let voice = LTVoiceCreate(48000)!
+        for style in 0...2 {
+            let voice = fixtureVoice()
             defer { LTVoiceDestroy(voice) }
             LTVoiceSet(voice,90,40,0.7,0.65,Int32(style))
             var samples = [Float](repeating:0,count:4800)
@@ -88,7 +132,7 @@ final class LidToneCoreTests: XCTestCase {
         }
     }
     func testZeroVolumeIsSilent() {
-        let voice = LTVoiceCreate(48000)!
+        let voice = fixtureVoice()
         defer { LTVoiceDestroy(voice) }
         LTVoiceSet(voice,90,50,1,0,1)
         var samples = [Float](repeating:1,count:4800)
@@ -96,9 +140,9 @@ final class LidToneCoreTests: XCTestCase {
         XCTAssertTrue(samples.allSatisfy { $0 == 0 })
     }
     func testAudioFadesAfterMotionStops() {
-        let voice = LTVoiceCreate(48000)!
+        let voice = fixtureVoice()
         defer { LTVoiceDestroy(voice) }
-        var samples = [Float](repeating:0,count:12000)
+        var samples = [Float](repeating:0,count:24000)
         LTVoiceSet(voice,90,50,1,1,0)
         LTVoiceRender(voice,&samples,UInt32(samples.count))
         LTVoiceSet(voice,90,0,0,1,0)
@@ -106,7 +150,7 @@ final class LidToneCoreTests: XCTestCase {
         XCTAssertLessThan(samples.suffix(256).map(abs).max()!,0.0003)
     }
     func testBadAudioParametersCannotProduceNaNOrClipping() {
-        let voice = LTVoiceCreate(48000)!
+        let voice = fixtureVoice()
         defer { LTVoiceDestroy(voice) }
         LTVoiceSet(voice,.nan,.infinity,2,-1,99)
         var samples = [Float](repeating:0,count:2048)

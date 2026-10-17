@@ -73,12 +73,14 @@ if CommandLine.arguments.contains("--sensor-check") {
 if CommandLine.arguments.contains("--check") {
     guard let voice = LTVoiceCreate(48000) else { exit(1) }
     defer { LTVoiceDestroy(voice) }
-    for style in 0...1 {
+    do { try SampleLibrary.load(into: voice) }
+    catch { print("Audio assets: \(error.localizedDescription)"); exit(1) }
+    for style in 0...2 {
         LTVoiceSet(voice, 90, 50, 0.8, 0.65, Int32(style))
         var samples = [Float](repeating: 0, count: 4800)
         LTVoiceRender(voice, &samples, UInt32(samples.count))
         guard samples.allSatisfy({ $0.isFinite && abs($0) <= 0.68 }), samples.contains(where: { abs($0) > 0.01 }) else { exit(1) }
-        print("OK \(style == 0 ? "creaking hinge" : "lightsaber"): live DSP renders a bounded signal")
+        print("OK \(["recorded wood", "recorded lightsaber", "sampled accordion"][style]): loaded samples render a bounded signal")
     }
     exit(0)
 }

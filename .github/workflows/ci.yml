@@ -11,9 +11,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Test motion tracking and continuous audio DSP
+      - name: Test motion tracking and sample playback
         run: swift test
-      - name: Package universal app and validate synthesizers
+      - name: Package universal app and validate recordings
         run: ./scripts/build-app.sh --universal
       - name: Verify both architectures
         run: lipo dist/LidTone.app/Contents/MacOS/LidTone -verify_arch arm64 x86_64

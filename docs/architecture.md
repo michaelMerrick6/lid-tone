@@ -6,7 +6,7 @@ Apple hinge orientation sensor
     → 30 Hz serial sampling
     → validated angle + monotonic timestamp
     → signed angular velocity, noise threshold, decay
-    → lock-free synthesizer controls
+    → lock-free sample-engine controls
     → AVAudioSourceNode → system output
 
 Actual angle and motion status → main thread → SwiftUI at 10 Hz
@@ -22,7 +22,7 @@ Sampling stays off the UI thread. Failed connections are retried every three sec
 
 ## Motion mapping
 
-The initial sample is silent. Angle differences over elapsed monotonic time yield signed velocity. Changes smaller than 0.35° are ignored, and velocity decays quickly when readings stop changing. After 140 ms without a movement sample it is set to zero. Gaps of 0.5 seconds or more, non-monotonic timestamps, invalid values, or jumps above 35° establish a new silent baseline.
+The initial sample is silent. Angle differences over elapsed monotonic time yield signed velocity. Changes smaller than 0.35° are ignored. Velocity is estimated over the interval between actual angle changes, not the 30 Hz polling interval. An adaptive 120–420 ms hold bridges the repeated values emitted by a whole-degree sensor; a short decay follows. This trades a roughly 0.3–0.6 second release tail for smoother slow movement. Gaps of 0.5 seconds or more, non-monotonic timestamps, invalid values, or jumps above 35° establish a new silent baseline.
 
 Intensity is a bounded square-root mapping of speed with adjustable response. Direction changes are reflected immediately instead of averaging opening and closing into silence. Quantization of whole-degree readings remains a physical limitation, especially during slow movement.
 
@@ -30,9 +30,11 @@ Preview uses a separate simulated motion trace. It never replaces the displayed 
 
 ## Audio thread
 
-The control queue publishes angle, velocity, intensity, volume, and voice selection through lock-free C atomics. The render thread owns all oscillator phases, noise state, and envelopes. It performs no allocation, blocking locks, file or network I/O, or UI work. Parameter snapshots can span one control update; each field is independently bounded, so this can only change timbre briefly, not produce invalid samples.
+The control queue publishes motion, volume, and mode through lock-free C atomics. All five recordings are decoded and copied to immutable, owned PCM buffers before rendering starts. The render thread owns the playback cursors and envelopes. It performs no allocation, blocking locks, file or network I/O, or UI work.
 
-Creak uses phase modulation and a stick/slip envelope with filtered noise. The lightsaber-style voice uses several harmonics plus motion-dependent air noise. Both are original synthesis, not sampled movie assets. An 8 ms attack / 28 ms release smooths gain changes; soft limiting bounds the output. The audio engine pauses after 250 ms without intensity and restarts on movement, avoiding a permanently active output while the screen is still.
+Wood uses a 15.35-second selection of real door creaks, with a gently speed-dependent playback rate. Saber blends a six-second recorded hum and a 9.8-second selection of recorded microphone swings; faster motion increases the swing layer. These are independently created CC0 effects, not official movie assets. Accordion uses six-second chord mixes from sampled Hohner reeds: opening blends toward C major and closing toward G major. Direction changes glide between chords.
+
+Loops overlap their last 120 ms with the beginning instead of making a hard cut. Cursors persist across sensor samples, mode changes, and short pauses. A 25 ms attack / 55 ms release smooths volume; mode changes crossfade and the output is soft limited. The audio engine pauses after 250 ms without intensity and restarts on movement. Preparation steps and original creator credits are in AUDIO_CREDITS.md.
 
 ## Compatibility and tests
 

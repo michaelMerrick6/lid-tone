@@ -9,8 +9,9 @@ struct MotionStyle: Identifiable {
     let detail: String
     let symbol: String
     static let all: [Self] = [
-        .init(id: 0, title: "Creaking hinge", detail: "A wooden-door creak that follows each tilt.", symbol: "door.left.hand.open"),
-        .init(id: 1, title: "Lightsaber", detail: "An electric hum and a swoosh with every swing.", symbol: "bolt.fill")
+        .init(id: 0, title: "Creaking hinge", detail: "Real wooden-door creaks, stretched across your tilt.", symbol: "door.left.hand.open"),
+        .init(id: 1, title: "Lightsaber", detail: "Recorded saber hum and a sweeping energy blade.", symbol: "bolt.fill"),
+        .init(id: 2, title: "Accordion", detail: "Sampled Hohner reeds. Your screen is the bellows.", symbol: "pianokeys")
     ]
 }
 
@@ -32,7 +33,8 @@ final class AppModel: ObservableObject {
 
     init() {
         enabled = defaults.object(forKey: "enabled") as? Bool ?? true
-        selectedStyle = defaults.integer(forKey: "motionStyle") == 1 ? 1 : 0
+        let savedStyle = defaults.integer(forKey: "motionStyle")
+        selectedStyle = (0...2).contains(savedStyle) ? savedStyle : 0
         volume = defaults.object(forKey: "volume") as? Double ?? 0.65
         sensitivity = defaults.object(forKey: "sensitivity") as? Double ?? 1
         motion.onReading = { [weak self] frame, text, preview in
@@ -50,7 +52,7 @@ final class AppModel: ObservableObject {
         configure(); motion.start()
     }
     deinit { for observer in observers { NSWorkspace.shared.notificationCenter.removeObserver(observer) } }
-    var selectedTitle: String { MotionStyle.all[selectedStyle == 1 ? 1 : 0].title }
+    var selectedTitle: String { MotionStyle.all[min(2, max(0, selectedStyle))].title }
     var motionLabel: String {
         if previewing { return "Previewing a simulated tilt" }
         if !enabled { return "Paused" }
