@@ -16,7 +16,7 @@ jobs:
       - name: Package universal app and validate synthesizers
         run: ./scripts/build-app.sh --universal
       - name: Verify both architectures
-        run: lipo -verify_arch arm64 x86_64 dist/LidTone.app/Contents/MacOS/LidTone
+        run: lipo dist/LidTone.app/Contents/MacOS/LidTone -verify_arch arm64 x86_64
       - name: Upload app
         uses: actions/upload-artifact@v4
         with:
